@@ -115,4 +115,16 @@ app.get('/positions/:accountId', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`IBKR Bridge corriendo en puerto ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`IBKR Bridge corriendo en puerto ${PORT}`);
+  
+  // Keep-alive: hace tickle cada 50 segundos para evitar DISCONNECT_ON_INACTIVITY
+  setInterval(async () => {
+    try {
+      await proxyRequest('/tickle', 'POST');
+      console.log('[Keep-alive] Tickle enviado a IB Gateway');
+    } catch(e) {
+      console.log('[Keep-alive] IB Gateway no responde, reintentando...');
+    }
+  }, 50000);
+});
