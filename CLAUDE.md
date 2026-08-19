@@ -36,6 +36,8 @@ IBKR_HOST=your-ngrok-subdomain.ngrok-free.app IBKR_PORT=443 PORT=3000 npm start
   like an ngrok/tunnel host (see above).
 - `PORT` — port the bridge itself listens on (default: `3000`; set automatically by Railway in
   production).
+- `DCA_ENABLED` / `DCA_ACCOUNT_ID` / `DCA_ALLOCATIONS` / `DCA_SCHEDULE` — see DCA section below.
+  Disabled by default; all four must be set correctly for scheduled buys to place real orders.
 
 ## Architecture
 
@@ -66,6 +68,23 @@ IBKR_HOST=your-ngrok-subdomain.ngrok-free.app IBKR_PORT=443 PORT=3000 npm start
 - A `setInterval` keep-alive loop calls `/tickle` every 50 seconds after the server starts, because
   IB Gateway's brokerage session expires without periodic activity. This must keep running for any
   long-lived deployment — don't remove it when refactoring startup logic.
+
+- **DCA (Dollar-Cost Averaging)**: a separate feature from the active-trading routes above, meant
+  for long-term buy-and-hold investing instead of trading. `runDca(accountId)` reads
+  `DCA_ALLOCATIONS` (JSON `{ "SYMBOL": monthlyUsdAmount }`), resolves each symbol to a conid via
+  `/iserver/secdef/search`, fetches the last price via `/iserver/marketdata/snapshot`, computes a
+  whole-share quantity (`floor(usdAmount / price)` — no fractional shares), and places a market BUY
+  through the same order + confirmation-reply flow as `/order`. Every attempt (bought, skipped for
+  insufficient funds, or errored) is appended to `dca-history.json` on disk via `appendDcaHistory`.
+  - `POST /dca/run/:accountId` triggers one purchase round manually (useful for testing config
+    before automating it).
+  - `GET /dca/history` / `GET /dca/config` are read-only introspection endpoints.
+  - A `node-cron` job in `app.listen` runs `runDca` on `DCA_SCHEDULE` (default: `0 9 1 * *`, the 1st
+    of each month at 9:00 UTC) — but **only** if `DCA_ENABLED=true` and `DCA_ACCOUNT_ID` are both
+    set; this is an intentional safety gate so the bridge doesn't place real orders by default.
+  - `dca-history.json` is plain local disk storage — on Railway without an attached persistent
+    volume, it's wiped on every redeploy/restart. Don't treat it as a durable audit trail unless a
+    volume is mounted.
 
 ## Deployment
 
