@@ -1,147 +1,135 @@
 const express = require('express');
 const cors = require('cors');
-const https = require('https');
-const http = require('http');
+
+const ibkr = require('./lib/ibkrClient');
+const config = require('./lib/config');
+const stateStore = require('./lib/stateStore');
+const watchlistStore = require('./lib/watchlist');
+const tradingCycle = require('./lib/tradingCycle');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const IBKR_HOST = process.env.IBKR_HOST || 'localhost';
-const IBKR_PORT = process.env.IBKR_PORT || '4001';
+// ---- Basic bridge endpoints (manual/inspection use) ----
 
-function proxyRequest(path, method = 'GET', body = null) {
-  return new Promise((resolve, reject) => {
-    const isNgrok = IBKR_HOST.includes('ngrok') || IBKR_HOST.includes('.app') || IBKR_HOST.includes('.dev');
-    const protocol = isNgrok ? https : http;
-    const port = isNgrok ? 443 : parseInt(IBKR_PORT);
-
-    const options = {
-      hostname: IBKR_HOST,
-      port: port,
-      path: `/v1/api${path}`,
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': '1',
-        'User-Agent': 'ibkr-bridge/1.0'
-      },
-      rejectUnauthorized: false,
-      timeout: 15000
-    };
-
-    const req = protocol.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        console.log(`[${method}] ${path} → ${res.statusCode}: ${data.substring(0,100)}`);
-        try { resolve(JSON.parse(data)); }
-        catch { resolve({ raw: data, status: res.statusCode }); }
-      });
-    });
-
-    req.on('error', (e) => {
-      console.error(`[ERROR] ${path}: ${e.message}`);
-      reject(e);
-    });
-    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
-    if (body) req.write(JSON.stringify(body));
-    req.end();
-  });
-}
-
-// Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', ibkr: `${IBKR_HOST}:${IBKR_PORT}`, time: new Date().toISOString() });
+  res.json({ status: 'ok', ibkr: `${ibkr.IBKR_HOST}:${ibkr.IBKR_PORT}`, time: new Date().toISOString() });
 });
 
-// Test connection to IB Gateway
 app.get('/test', async (req, res) => {
   try {
-    const data = await proxyRequest('/iserver/auth/status');
+    const data = await ibkr.proxyRequest('/iserver/auth/status');
     res.json({ connected: true, data });
-  } catch(e) {
-    res.json({ connected: false, error: e.message });
-  }
+  } catch (e) { res.json({ connected: false, error: e.message }); }
 });
 
-// Auth status
 app.get('/auth', async (req, res) => {
-  try {
-    const data = await proxyRequest('/iserver/auth/status');
-    res.json(data);
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await ibkr.proxyRequest('/iserver/auth/status')); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Keep alive tickle
 app.post('/tickle', async (req, res) => {
-  try {
-    const data = await proxyRequest('/tickle', 'POST');
-    res.json(data);
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await ibkr.proxyRequest('/tickle', 'POST')); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Get accounts
 app.get('/accounts', async (req, res) => {
-  try {
-    const data = await proxyRequest('/iserver/accounts');
-    res.json(data);
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await ibkr.getAccounts()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Search contract
 app.get('/search/:symbol', async (req, res) => {
-  try {
-    const data = await proxyRequest(`/iserver/secdef/search?symbol=${req.params.symbol}&name=true&secType=STK`);
-    res.json(data);
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await ibkr.searchSymbol(req.params.symbol)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Get price bars
 app.get('/bars/:conid', async (req, res) => {
-  try {
-    const data = await proxyRequest(`/iserver/marketdata/history?conid=${req.params.conid}&period=1h&bar=1min&outsideRth=false`);
-    res.json(data);
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await ibkr.getBars(req.params.conid, req.query.period || '1h', req.query.bar || '1min')); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Place order
+// Raw manual order (no bracket, no risk checks) — kept for manual/ad-hoc use.
+// Automated trading goes through /cycle, which applies risk limits and bracket orders.
 app.post('/order', async (req, res) => {
   try {
     const { accountId, conid, side, quantity } = req.body;
-    const data = await proxyRequest(`/iserver/account/${accountId}/orders`, 'POST', {
-      orders: [{ conid, orderType: 'MKT', side, quantity, tif: 'DAY', acctId: accountId }]
-    });
-    // Handle IBKR confirmation requirement
-    if (Array.isArray(data) && data[0]?.id) {
-      const confirm = await proxyRequest(`/iserver/reply/${data[0].id}`, 'POST', { confirmed: true });
-      res.json(confirm);
-    } else {
-      res.json(data);
-    }
-  } catch(e) { res.status(500).json({ error: e.message }); }
+    const data = await ibkr.placeOrders(accountId, [
+      { conid, orderType: 'MKT', side, quantity, tif: 'DAY', acctId: accountId },
+    ]);
+    res.json(data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Get positions
 app.get('/positions/:accountId', async (req, res) => {
+  try { res.json(await ibkr.getPositions(req.params.accountId)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- Automated trading endpoints ----
+
+app.get('/watchlist', (req, res) => {
+  res.json(watchlistStore.load());
+});
+
+app.post('/watchlist', async (req, res) => {
   try {
-    const data = await proxyRequest(`/portfolio/${req.params.accountId}/positions/0`);
-    res.json(data);
-  } catch(e) { res.status(500).json({ error: e.message }); }
+    const { symbol } = req.body;
+    if (!symbol) return res.status(400).json({ error: 'symbol is required' });
+    res.json(await watchlistStore.addSymbol(symbol));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/watchlist/:symbol', (req, res) => {
+  res.json(watchlistStore.removeSymbol(req.params.symbol));
+});
+
+app.get('/status', (req, res) => {
+  res.json({ config, state: stateStore.load() });
+});
+
+// Kill switch: flip on to immediately stop the automated cycle from opening/closing
+// any more positions. Existing bracket orders already sitting at IBKR are unaffected —
+// their stop-loss/take-profit legs keep working independently.
+app.post('/kill', (req, res) => {
+  const state = stateStore.load();
+  state.killSwitch = req.body?.enabled !== false;
+  stateStore.save(state);
+  res.json({ killSwitch: state.killSwitch });
+});
+
+app.post('/cycle', async (req, res) => {
+  try {
+    res.json(await tradingCycle.runCycle());
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`IBKR Bridge v2 corriendo en puerto ${PORT}`);
-  console.log(`Conectando a IB Gateway en: ${IBKR_HOST}:${IBKR_PORT}`);
+  console.log(`Conectando a IB Gateway en: ${ibkr.IBKR_HOST}:${ibkr.IBKR_PORT}`);
+  console.log(`PAPER_MODE=${config.PAPER_MODE} AUTOTRADE_ENABLED=${config.AUTOTRADE_ENABLED}`);
 
-  // Keep-alive cada 50 segundos
+  // Keep-alive tickle so the IB Gateway session doesn't expire.
   setInterval(async () => {
     try {
-      await proxyRequest('/tickle', 'POST');
+      await ibkr.proxyRequest('/tickle', 'POST');
       console.log('[Keep-alive] OK');
-    } catch(e) {
+    } catch (e) {
       console.log('[Keep-alive] Error:', e.message);
     }
   }, 50000);
+
+  // Fully automated cycle, off by default. Enable with AUTOTRADE_ENABLED=true
+  // once you've validated the strategy manually via POST /cycle in paper trading.
+  if (config.AUTOTRADE_ENABLED) {
+    setInterval(async () => {
+      try {
+        const result = await tradingCycle.runCycle();
+        console.log('[AutoTrade]', JSON.stringify(result.halted ? result : { actions: result.actions }));
+      } catch (e) {
+        console.error('[AutoTrade] Error:', e.message);
+      }
+    }, config.AUTOTRADE_INTERVAL_MS);
+  }
 });

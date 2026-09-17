@@ -1,13 +1,76 @@
-# IBKR Bridge Server
+# IBKR Bridge + Trading Engine
 
-Servidor puente entre el bot en Netlify e IB Gateway local.
+Servidor puente entre un frontend (bot en Netlify u otro cliente) e IB Gateway
+local, con un motor de trading automatizado encima: noticias + momentum de
+precio → señal → gestión de riesgo → órdenes bracket (entrada + stop-loss +
+take-profit) en IBKR.
+
+## ⚠️ Antes de usar esto con dinero real
+
+- **Ninguna estrategia aquí "predice" el mercado.** El motor de señales combina
+  sentimiento de noticias con momentum de precio y solo actúa cuando ambos
+  coinciden — esto reduce ruido, no lo elimina.
+- Empieza siempre en **cuenta paper de IBKR** (`PAPER_MODE=true`, por defecto).
+  El sistema **rechaza órdenes** si `PAPER_MODE=true` y el `accountId` no
+  empieza por `DU` (convención de cuentas paper de IBKR).
+- Para operar en real hace falta `PAPER_MODE=false` **y**
+  `LIVE_TRADING_CONFIRM=I_UNDERSTAND_THE_RISK`. Es intencionalmente incómodo.
+- El trading totalmente automático (`AUTOTRADE_ENABLED=true`) está **apagado
+  por defecto**. Valida el ciclo manualmente con `POST /cycle` durante
+  semanas en paper antes de encenderlo.
+- Revisa el formato exacto de las órdenes bracket (`lib/orderExecutor.js`)
+  contra la documentación actual de tu IB Gateway antes de confiar en él con
+  capital real — la API de IBKR puede variar entre versiones del gateway.
 
 ## Deploy en Railway
+
 1. Sube esta carpeta a GitHub
 2. Conecta el repo en railway.app
-3. Agrega variable de entorno: IBKR_HOST = tu IP pública
+3. Configura las variables de entorno (ver `.env.example`)
 
 ## Variables de entorno
-- IBKR_HOST: IP pública de tu PC (ver abajo)
-- IBKR_PORT: 5000 (por defecto)
-- PORT: asignado por Railway automáticamente
+
+Ver `.env.example` para la lista completa. Las más importantes:
+
+- `IBKR_HOST` / `IBKR_PORT`: dirección de tu IB Gateway
+- `ACCOUNT_ID`: cuenta IBKR a operar (si se omite, usa la primera de `/iserver/accounts`)
+- `PAPER_MODE`: `true` por defecto — bloquea trading fuera de cuenta paper
+- `AUTOTRADE_ENABLED`: activa el ciclo automático en background
+- `FINNHUB_API_KEY`: opcional, mejora el sentimiento de noticias (si no se
+  define, cae a un análisis de palabras clave sobre RSS de Yahoo Finance)
+
+## Endpoints
+
+### Bridge manual (inspección / uso puntual)
+
+- `GET /health` — estado del servidor
+- `GET /test`, `GET /auth`, `POST /tickle` — estado de sesión con IB Gateway
+- `GET /accounts` — cuentas disponibles
+- `GET /search/:symbol` — buscar contrato
+- `GET /bars/:conid?period=1h&bar=1min` — velas históricas
+- `POST /order` — orden de mercado cruda, sin gestión de riesgo (uso manual)
+- `GET /positions/:accountId` — posiciones abiertas
+
+### Motor de trading automatizado
+
+- `GET /watchlist` — símbolos vigilados
+- `POST /watchlist` `{ "symbol": "AAPL" }` — agrega un símbolo (resuelve su conid)
+- `DELETE /watchlist/:symbol` — quita un símbolo
+- `POST /cycle` — ejecuta un ciclo completo (noticias + momentum → señal →
+  riesgo → orden bracket) sobre todos los símbolos de la watchlist
+- `GET /status` — configuración activa y estado (posiciones abiertas, P&L del
+  día, trades del día, kill switch)
+- `POST /kill` `{ "enabled": true }` — kill switch: detiene el ciclo
+  automático de inmediato (no cancela órdenes bracket ya colocadas en IBKR)
+
+## Flujo recomendado
+
+1. `POST /watchlist` para armar tu lista de símbolos
+2. `POST /cycle` manualmente varias veces en cuenta paper, revisando `GET
+   /status` y los logs — ajusta los umbrales/límites de riesgo en las
+   variables de entorno según lo que veas
+3. Si quieres automatizarlo, agenda `POST /cycle` externamente (cron) o activa
+   `AUTOTRADE_ENABLED=true` para que el propio servidor lo dispare cada
+   `AUTOTRADE_INTERVAL_MS`
+4. Solo después de suficiente validación en paper, considera pasar a cuenta
+   real siguiendo las salvaguardas de arriba
