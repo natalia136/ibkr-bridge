@@ -4,7 +4,9 @@
   "description": "Puente entre Netlify y IB Gateway",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test \"test/**/*.test.js\"",
+    "backtest": "node scripts/backtest.js"
   },
   "dependencies": {
     "express": "^4.18.2",

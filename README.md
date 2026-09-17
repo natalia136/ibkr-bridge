@@ -63,6 +63,34 @@ Ver `.env.example` para la lista completa. Las más importantes:
 - `POST /kill` `{ "enabled": true }` — kill switch: detiene el ciclo
   automático de inmediato (no cancela órdenes bracket ya colocadas en IBKR)
 
+## Backtesting (antes de confiar en la estrategia)
+
+Ver `specs/backtest-engine/` para el spec completo. Resumen de uso:
+
+```bash
+npm test  # corre los tests unitarios del motor de backtest
+node scripts/backtest.js --symbols AAPL,MSFT,NVDA,JPM,XOM \
+  --start 2022-01-01 --split 2023-07-01 --end 2024-06-01
+```
+
+- Precios históricos vienen de Stooq (gratis, sin API key) y se cachean en
+  `data/price-cache/`.
+- **Importante**: por ahora el sentimiento histórico está degradado (no hay
+  proveedor gratis confiable con histórico) — el motor mide solo el
+  componente de momentum. Esto se indica explícitamente en cada reporte
+  (`dataQuality.sentimentThresholdOverridden`).
+- El reporte separa resultados **in-sample** (usado para ajustar) y
+  **out-of-sample** (nunca visto durante el ajuste) — solo el out-of-sample
+  decide si la estrategia "pasa" (`report.passesGate`), contra:
+  Sharpe ≥ 1.0, max drawdown ≤ 20%, profit factor > 1.3, ≥30 operaciones.
+- También disponible como API: `POST /backtest`, `GET /backtest`,
+  `GET /backtest/:runId`.
+- Resultados persistidos en `data/backtests/<runId>/` (config, curva de
+  equity, trades, reporte) para poder comparar corridas entre sí.
+
+**No mover la estrategia a paper trading real (mucho menos a dinero real)
+sin que `passesGate` sea `true` en el out-of-sample.**
+
 ## Flujo recomendado
 
 1. `POST /watchlist` para armar tu lista de símbolos

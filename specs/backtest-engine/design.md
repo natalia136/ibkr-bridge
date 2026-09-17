@@ -87,6 +87,16 @@ momentum de la estrategia** — se documenta explícitamente en el reporte
 (`dataQuality.sentimentDegradedPct: 100`) para que nadie confunda ese
 resultado con "la estrategia completa está probada".
 
+**Corrección importante**: `computeSignal` exige que momentum Y sentimiento
+superen su umbral (`SENTIMENT_THRESHOLD`, default 0.2 en vivo). Si el
+sentimiento está permanentemente en 0 (degradado) y dejamos ese umbral en
+0.2, la condición de sentimiento nunca se cumple y el backtest no abriría
+ninguna operación jamás — no "mide solo momentum", mide nada. Por eso
+`runBacktest.js` detecta cuando la fuente de sentimiento está degradada y
+neutraliza `SENTIMENT_THRESHOLD` a `0` para esa corrida (así `score=0`
+sí satisface el umbral), dejando registrado en `config.json` que el
+override se aplicó y por qué.
+
 ## Motor de simulación (`simulator.js`)
 
 Pseudocódigo del loop principal, barra por barra:

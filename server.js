@@ -6,6 +6,8 @@ const config = require('./lib/config');
 const stateStore = require('./lib/stateStore');
 const watchlistStore = require('./lib/watchlist');
 const tradingCycle = require('./lib/tradingCycle');
+const { runBacktest } = require('./lib/backtest/runBacktest');
+const backtestStore = require('./lib/backtest/reportStore');
 
 const app = express();
 app.use(cors());
@@ -102,6 +104,33 @@ app.post('/cycle', async (req, res) => {
   try {
     res.json(await tradingCycle.runCycle());
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- Backtesting (see specs/backtest-engine/) ----
+// Validates the strategy against history before it runs against any more capital.
+
+app.post('/backtest', async (req, res) => {
+  try {
+    const { symbols, start, split, end, equity } = req.body;
+    if (!symbols?.length || !start || !split || !end) {
+      return res.status(400).json({ error: 'symbols (array), start, split, end are required' });
+    }
+    const { runId, report } = await runBacktest({
+      universe: symbols.map(s => s.toUpperCase()),
+      startDate: start, splitDate: split, endDate: end,
+      initialEquity: equity || 100000,
+    });
+    res.json({ runId, report });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/backtest', (req, res) => {
+  res.json({ runs: backtestStore.listRuns() });
+});
+
+app.get('/backtest/:runId', (req, res) => {
+  try { res.json(backtestStore.loadRun(req.params.runId)); }
+  catch (e) { res.status(404).json({ error: `run not found: ${req.params.runId}` }); }
 });
 
 const PORT = process.env.PORT || 3000;

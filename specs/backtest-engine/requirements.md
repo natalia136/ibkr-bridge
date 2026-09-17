@@ -97,15 +97,15 @@ Estos umbrales son puntos de partida razonables para una estrategia
 sistemática simple, no una garantía — se documentan aquí para que la
 decisión de "¿esto sirve?" no sea subjetiva el día que veamos los números.
 
-## Preguntas abiertas (necesitan tu decisión antes de construir)
+## Decisiones (resueltas)
 
-1. **Fuente de precios históricos**: ¿usamos el propio historial de IBKR
-   (`/iserver/marketdata/history` con rangos largos, sujeto a límites de la
-   API) o una fuente externa (ej. Stooq, que es gratis y no requiere key)?
-2. **Fuente de sentimiento histórico**: Finnhub free tier no da sentimiento
-   histórico profundo. ¿Aceptamos el fallback degradado (R2.2) para la
-   primera versión, o vale la pena pagar por un proveedor con histórico
-   (ej. Finnhub paid, Alpha Vantage News Sentiment histórico)?
-3. **Universo de símbolos** para la primera corrida de validación: ¿los
-   mismos que pondrías en la watchlist real, o un universo más amplio para
-   ver en qué tipo de acciones funciona/falla la estrategia?
+1. **Precios históricos**: Stooq (gratis, sin API key) — `lib/backtest/priceHistory.js`.
+2. **Sentimiento histórico**: degradado (solo momentum) para la primera
+   versión — `lib/backtest/sentimentHistory.js`. `SENTIMENT_THRESHOLD` se
+   neutraliza automáticamente cuando la fuente está 100% degradada (ver
+   nota en design.md) para que la puerta de "acuerdo" no bloquee todo.
+3. **Universo de validación**: amplio (ej. S&P 100), no solo la watchlist
+   planeada — para entender en qué tipo de acciones funciona/falla la
+   estrategia antes de fijar la watchlist real (pendiente de ejecutar, ver
+   tasks.md T9 — requiere correr fuera de este sandbox, que bloquea salida
+   de red hacia proveedores de datos financieros).
