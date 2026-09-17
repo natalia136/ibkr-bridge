@@ -10,8 +10,10 @@
     "screener": "node screener-server.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.126.0",
     "@google-cloud/firestore": "^9.1.0",
     "cors": "^2.8.5",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "zod": "^4.6.5"
   }
 }

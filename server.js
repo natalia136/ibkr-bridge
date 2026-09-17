@@ -8,6 +8,11 @@ const watchlistStore = require('./lib/watchlist');
 const tradingCycle = require('./lib/tradingCycle');
 const { runBacktest } = require('./lib/backtest/runBacktest');
 const backtestStore = require('./lib/backtest/reportStore');
+const { checkGraduation } = require('./lib/graduation/graduationGate');
+const equityHistory = require('./lib/equityHistory');
+const allocationStore = require('./lib/passive/allocation');
+const { runRebalance } = require('./lib/passive/portfolioManager');
+const { renderMissionControl } = require('./lib/dashboard');
 
 const app = express();
 app.use(cors());
@@ -131,6 +136,58 @@ app.get('/backtest', (req, res) => {
 app.get('/backtest/:runId', (req, res) => {
   try { res.json(backtestStore.loadRun(req.params.runId)); }
   catch (e) { res.status(404).json({ error: `run not found: ${req.params.runId}` }); }
+});
+
+// ---- Graduation gate (see lib/graduation/graduationGate.js) ----
+// Whether real-money trading is currently allowed, on top of manually
+// flipping PAPER_MODE/LIVE_TRADING_CONFIRM.
+
+app.get('/graduation/status', (req, res) => {
+  res.json(checkGraduation({ MIN_PAPER_DAYS: config.GRADUATION_MIN_PAPER_DAYS }));
+});
+
+app.get('/equity-history', (req, res) => {
+  res.json({ history: equityHistory.load() });
+});
+
+// ---- Passive portfolio (long-term dividend/ETF book, see lib/passive/) ----
+
+app.get('/passive/allocation', (req, res) => {
+  res.json(allocationStore.load());
+});
+
+app.post('/passive/allocation', async (req, res) => {
+  try {
+    const { symbol, targetPct } = req.body;
+    if (!symbol || targetPct == null) return res.status(400).json({ error: 'symbol and targetPct are required' });
+    res.json(await allocationStore.setTarget(symbol, targetPct));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/passive/allocation/:symbol', (req, res) => {
+  res.json(allocationStore.removeTarget(req.params.symbol));
+});
+
+// Dry-run by default — pass {"execute": true} to actually place rebalance
+// orders (also requires PASSIVE_AUTOTRADE_ENABLED=true and the same
+// paper/live/graduation safety gate as the active engine).
+app.post('/passive/rebalance', async (req, res) => {
+  try {
+    res.json(await runRebalance({ execute: req.body?.execute === true }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/dashboard', async (req, res) => {
+  try {
+    const [graduation, allocation, rebalancePreview] = await Promise.all([
+      Promise.resolve(checkGraduation({ MIN_PAPER_DAYS: config.GRADUATION_MIN_PAPER_DAYS })),
+      Promise.resolve(allocationStore.load()),
+      runRebalance({ execute: false }).catch(e => ({ rebalanced: false, reason: e.message })),
+    ]);
+    const state = stateStore.load();
+    const watchlist = watchlistStore.load();
+    res.type('html').send(renderMissionControl({ graduation, allocation, rebalancePreview, state, watchlist, config }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 const PORT = process.env.PORT || 3000;

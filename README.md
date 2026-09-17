@@ -91,6 +91,58 @@ node scripts/backtest.js --symbols AAPL,MSFT,NVDA,JPM,XOM \
 **No mover la estrategia a paper trading real (mucho menos a dinero real)
 sin que `passesGate` sea `true` en el out-of-sample.**
 
+## Sistema completo: activo + pasivo + agente híbrido + gate de graduación
+
+Esta sección resume cómo encajan todas las piezas para la gestión completa
+(activa y pasiva) que construimos:
+
+### El "cerebro" híbrido (LLM investiga, reglas deciden)
+
+`lib/agent/analystAgent.js` llama a Claude (Opus 5) para que actúe como un
+analista senior: recibe el momentum técnico y titulares de noticias de un
+candidato, y devuelve `{recommendation: BUY|HOLD|AVOID, confidence,
+reasoning, riskFlags}` como salida estructurada (`output_config.format` +
+Zod). **El agente solo puede restringir operaciones, nunca aprobar una que
+la señal determinista ya rechazó, y nunca decide tamaño de posición ni
+stops** — eso sigue 100% en `riskManager.js`. Si el agente no está
+configurado (`ANTHROPIC_API_KEY` vacío) o falla, cae de forma segura a
+`HOLD` — nunca asume BUY por defecto. Cachea su veredicto por símbolo/día
+(`data/agent-cache/`) para no llamar al LLM en cada ciclo de 5 minutos.
+
+Actívalo/desactívalo con `AGENT_GATE_ENABLED` (default `true`).
+
+### El gate de graduación (obligatorio para dinero real)
+
+`lib/graduation/graduationGate.js` es una condición **adicional y
+automática**, aparte de `PAPER_MODE=false` + `LIVE_TRADING_CONFIRM`, que
+bloquea cualquier orden real hasta que:
+
+1. El backtest más reciente (`POST /backtest`) tenga `passesGate: true`.
+2. Existan al menos `GRADUATION_MIN_PAPER_DAYS` (default 14) días de
+   trading en paper **sin** haber tocado el límite de pérdida diaria.
+
+Revisa el estado en `GET /graduation/status`. Esto existe porque pediste
+capital real "desde ya" — el sistema no te va a dejar saltarte la
+validación solo porque cambiaste una variable de entorno.
+
+### Cartera pasiva (dividendos / ETFs para la jubilación)
+
+`lib/passive/` gestiona una cartera de largo plazo por separado del motor
+activo: defines una asignación objetivo (`POST /passive/allocation
+{"symbol":"SCHD","targetPct":0.3}`), y `POST /passive/rebalance` calcula el
+desvío y las órdenes necesarias para volver al objetivo (sin stops/take
+profit — es buy-and-hold). **Dry-run por defecto** — pasa
+`{"execute":true}` y activa `PASSIVE_AUTOTRADE_ENABLED=true` para que
+ejecute de verdad, y aun así pasa por el mismo gate de graduación que el
+motor activo.
+
+### Mission Control
+
+`GET /dashboard` — una sola página que muestra: estado del gate de
+graduación (con barra de progreso), posiciones abiertas del motor activo,
+kill switch, y el desvío de la cartera pasiva. Es la vista para responder
+"¿esto está ganando o perdiendo plata, y ya se puede confiar en él?".
+
 ## Screener de acciones (descubrimiento, no ejecución)
 
 Servicio **separado** (`screener-server.js`) que no toca tu cuenta IBKR —
