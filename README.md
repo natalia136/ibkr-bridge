@@ -91,6 +91,56 @@ node scripts/backtest.js --symbols AAPL,MSFT,NVDA,JPM,XOM \
 **No mover la estrategia a paper trading real (mucho menos a dinero real)
 sin que `passesGate` sea `true` en el out-of-sample.**
 
+## Screener de acciones (descubrimiento, no ejecución)
+
+Servicio **separado** (`screener-server.js`) que no toca tu cuenta IBKR —
+solo lee precios (Stooq) y dividendos (Financial Modeling Prep, opcional)
+públicos, y te muestra un ranking. **No compra ni vende nada.**
+
+Criterios combinados (peso 50/50 configurable):
+- **Técnico**: tendencia (precio vs. SMA50/SMA200), momentum (RSI), posición
+  respecto al mínimo de 52 semanas.
+- **Dividendos**: yield en rango sano (penaliza yields extremos como posible
+  "trampa"), años consecutivos de crecimiento del dividendo, payout ratio.
+
+Cada score muestra sus componentes (no es una caja negra) — la idea es que
+investigues el candidato, no que confíes ciegamente en un número.
+
+### Correr localmente
+
+```bash
+FMP_API_KEY=tu_key node screener-server.js   # o npm run screener
+curl -X POST http://localhost:8080/run       # dispara una corrida
+open http://localhost:8080                   # dashboard
+```
+
+Sin `FMP_API_KEY`, el criterio de dividendos queda degradado (solo técnico) —
+igual que el sentimiento de noticias en el motor de trading, esto se marca
+explícitamente en el resultado (`insufficientData`), nunca se inventa un dato.
+
+### Desplegar en GCP (arquitectura propuesta)
+
+**Cloud Scheduler → Cloud Run → Firestore → dashboard.** El screener no
+necesita hablar con tu IB Gateway, así que vive separado del bridge (que
+sigue en Railway).
+
+```bash
+export PROJECT_ID=tu-proyecto-gcp
+export SCREENER_RUN_TOKEN=$(openssl rand -hex 16)
+export FMP_API_KEY=tu_key   # opcional
+./scripts/deploy-screener-gcp.sh
+```
+
+El script (revísalo antes de correrlo — no fue ejecutado por Claude, esta
+sesión no tiene credenciales de GCP) crea: la base de Firestore, la imagen
+en Cloud Build usando `Dockerfile.screener`, el servicio de Cloud Run
+(`RESULTS_STORE=firestore`), y un job de Cloud Scheduler que dispara
+`POST /run` cada día después del cierre de mercado.
+
+Por defecto el servicio se despliega con `--no-allow-unauthenticated`
+(dashboard privado) — usa `gcloud run services proxy` para verlo, o decide
+tú si quieres exponerlo públicamente.
+
 ## Flujo recomendado
 
 1. `POST /watchlist` para armar tu lista de símbolos
