@@ -22,11 +22,53 @@ take-profit) en IBKR.
   contra la documentación actual de tu IB Gateway antes de confiar en él con
   capital real — la API de IBKR puede variar entre versiones del gateway.
 
-## Deploy en Railway
+## Deploy
+
+Tres opciones — usa la que prefieras, todas corren el mismo código:
+
+### GCP Cloud Run (recomendado — Claude vía Vertex AI, sin API key aparte)
+
+```bash
+# 1. Habilita Claude en Vertex AI Model Garden para tu proyecto:
+#    console.cloud.google.com/vertex-ai/model-garden -> busca "Claude" -> Enable
+export PROJECT_ID=tu-proyecto-gcp
+export IBKR_HOST=tu-ip-o-tunel-ngrok
+./scripts/deploy-bridge-gcp.sh
+```
+
+Revisa el script antes de correrlo — no fue ejecutado por Claude (esta sesión
+no tiene credenciales de GCP). Crea una service account con permiso
+`roles/aiplatform.user` y despliega a Cloud Run con `GCP_PROJECT_ID`/`GCP_REGION`
+configurados — el agente híbrido llama a Claude usando esas credenciales
+automáticamente, sin `ANTHROPIC_API_KEY`.
+
+### VPS en Hostinger (acceso root → Docker)
+
+```bash
+# En el VPS, con Docker instalado:
+git clone <tu-repo> && cd ibkr-bridge
+cp .env.example .env   # completa IBKR_HOST, GCP_PROJECT_ID, etc.
+
+# Vertex AI desde fuera de GCP necesita una key de service account (no gcloud
+# login interactivo) — en Google Cloud Console: IAM -> Service Accounts ->
+# crea una con rol "Vertex AI User" -> genera una key JSON.
+mv ~/Downloads/tu-key.json ./gcp-key.json
+echo "GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-key.json" >> .env
+
+docker compose up -d --build
+```
+
+Esto levanta tanto el bridge (`:3000`) como el screener (`:8080`) en el mismo
+VPS. Pon un reverse proxy (Caddy o nginx) delante con TLS antes de exponer
+`/dashboard` públicamente — ninguno de los dos viene con HTTPS propio.
+
+### Railway (como estaba originalmente)
 
 1. Sube esta carpeta a GitHub
 2. Conecta el repo en railway.app
-3. Configura las variables de entorno (ver `.env.example`)
+3. Configura las variables de entorno (ver `.env.example`) — usa
+   `ANTHROPIC_API_KEY` en vez de `GCP_PROJECT_ID` si te quedas aquí, ya que
+   Railway no trae credenciales de GCP por defecto.
 
 ## Variables de entorno
 

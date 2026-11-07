@@ -1,0 +1,24 @@
+services:
+  bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ${GCP_KEY_FILE:-./gcp-key.json}:/app/gcp-key.json:ro
+
+  screener:
+    build:
+      context: .
+      dockerfile: Dockerfile.screener
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ${GCP_KEY_FILE:-./gcp-key.json}:/app/gcp-key.json:ro
