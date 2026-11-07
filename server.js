@@ -12,6 +12,7 @@ const { checkGraduation } = require('./lib/graduation/graduationGate');
 const equityHistory = require('./lib/equityHistory');
 const allocationStore = require('./lib/passive/allocation');
 const { runRebalance } = require('./lib/passive/portfolioManager');
+const { runDca } = require('./lib/passive/autoDca');
 const { renderMissionControl } = require('./lib/dashboard');
 
 const app = express();
@@ -174,6 +175,17 @@ app.delete('/passive/allocation/:symbol', (req, res) => {
 app.post('/passive/rebalance', async (req, res) => {
   try {
     res.json(await runRebalance({ execute: req.body?.execute === true }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Dollar-cost-averaging into the screener's top dividend candidates — a
+// different mechanism from /passive/rebalance (no fixed target allocation,
+// just periodically deploying new money into whatever currently ranks best).
+// Dry-run by default — pass {"execute": true} to actually place orders
+// (also requires DCA_ENABLED=true and the same graduation gate).
+app.post('/passive/dca', async (req, res) => {
+  try {
+    res.json(await runDca({ execute: req.body?.execute === true }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

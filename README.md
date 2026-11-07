@@ -169,14 +169,25 @@ validación solo porque cambiaste una variable de entorno.
 
 ### Cartera pasiva (dividendos / ETFs para la jubilación)
 
-`lib/passive/` gestiona una cartera de largo plazo por separado del motor
-activo: defines una asignación objetivo (`POST /passive/allocation
-{"symbol":"SCHD","targetPct":0.3}`), y `POST /passive/rebalance` calcula el
-desvío y las órdenes necesarias para volver al objetivo (sin stops/take
-profit — es buy-and-hold). **Dry-run por defecto** — pasa
-`{"execute":true}` y activa `PASSIVE_AUTOTRADE_ENABLED=true` para que
-ejecute de verdad, y aun así pasa por el mismo gate de graduación que el
-motor activo.
+`lib/passive/` tiene **dos mecanismos** distintos, por separado del motor activo:
+
+1. **Rebalanceo a una asignación objetivo que tú defines**: `POST
+   /passive/allocation {"symbol":"SCHD","targetPct":0.3}`, y `POST
+   /passive/rebalance` calcula el desvío y las órdenes para volver al
+   objetivo (sin stops/take profit — es buy-and-hold).
+2. **DCA automático** (`lib/passive/autoDca.js`): sin que definas una
+   asignación fija, `POST /passive/dca` toma los mejores candidatos del
+   **screener** por salud de dividendos (excluyendo cualquiera sin datos de
+   dividendo confiables) y reparte un monto de contribución fijo
+   (`DCA_MONTHLY_AMOUNT`, default $200) entre los `DCA_TOP_N` mejores —
+   dollar-cost averaging clásico, respetando un intervalo mínimo
+   (`DCA_MIN_INTERVAL_DAYS`) para no duplicar la contribución del mes.
+
+Ambos son **dry-run por defecto** — pasa `{"execute":true}` y activa
+`PASSIVE_AUTOTRADE_ENABLED=true` / `DCA_ENABLED=true` respectivamente para
+que ejecuten de verdad, y los dos pasan por el mismo gate de graduación que
+el motor activo (una sola puerta de seguridad para todo el sistema, no una
+más débil para lo "menos riesgoso").
 
 ### Mission Control
 
